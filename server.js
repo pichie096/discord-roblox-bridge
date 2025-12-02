@@ -15,7 +15,6 @@ const MAX_MESSAGES = 50;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID; // Your Discord server ID
 const DISCORD_CATEGORY_ID = process.env.DISCORD_CATEGORY_ID; // Optional: category to create channels in
-const DISCORD_ALLOWED_ROLE_ID = process.env.DISCORD_ALLOWED_ROLE_ID; // Optional: Role ID that can see channels
 const PORT = process.env.PORT || 3000;
 
 // Create Discord bot
@@ -54,27 +53,8 @@ async function getOrCreateChannel(serverId) {
         const channelOptions = {
             name: `roblox-${shortId}`,
             type: ChannelType.GuildText,
-            topic: `Roblox Server ID: ${serverId}`,
-            permissionOverwrites: [
-                {
-                    // Deny @everyone from seeing the channel
-                    id: guild.roles.everyone.id,
-                    deny: [PermissionFlagsBits.ViewChannel]
-                }
-            ]
+            topic: `Roblox Server ID: ${serverId}`
         };
-
-        // If a specific role is specified, allow them to see it
-        if (DISCORD_ALLOWED_ROLE_ID) {
-            channelOptions.permissionOverwrites.push({
-                id: DISCORD_ALLOWED_ROLE_ID,
-                allow: [
-                    PermissionFlagsBits.ViewChannel,
-                    PermissionFlagsBits.SendMessages,
-                    PermissionFlagsBits.ReadMessageHistory
-                ]
-            });
-        }
 
         // Add to category if specified
         if (DISCORD_CATEGORY_ID) {
