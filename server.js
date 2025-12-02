@@ -208,7 +208,7 @@ app.post('/send', async (req, res) => {
     }
 });
 
-// Unregister a Roblox server (archive channel)
+// Unregister a Roblox server (delete channel)
 app.post('/unregister-server', async (req, res) => {
     const { serverId } = req.body;
     
@@ -220,49 +220,18 @@ app.post('/unregister-server', async (req, res) => {
         const channelId = serverChannels.get(serverId);
         if (channelId) {
             const channel = await discordClient.channels.fetch(channelId);
-            const guild = channel.guild;
-            
-            // Set up permissions for archived channel
-            const permissionOverwrites = [
-                {
-                    // Hide from @everyone
-                    id: guild.roles.everyone.id,
-                    deny: [
-                        PermissionFlagsBits.ViewChannel,
-                        PermissionFlagsBits.SendMessages,
-                        PermissionFlagsBits.AddReactions
-                    ]
-                }
-            ];
-
-            // If a specific role is specified, allow them to VIEW archived channels (but not send)
-            if (DISCORD_ALLOWED_ROLE_ID) {
-                permissionOverwrites.push({
-                    id: DISCORD_ALLOWED_ROLE_ID,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-                    deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions]
-                });
-            }
-            
-            // Archive the channel (lock it and rename)
-            await channel.edit({
-                name: `archived-${channel.name}`,
-                permissionOverwrites: permissionOverwrites
-            });
-            
-            // Send closure message
-            await channel.send('🔒 **Roblox server closed.** This channel has been archived and is read-only.');
+            await channel.delete('Roblox server closed');
             
             // Remove from active servers
             serverChannels.delete(serverId);
             serverMessages.delete(serverId);
             
-            console.log(`📦 Archived channel for server ${serverId.substring(0, 8)}`);
+            console.log(`🗑️ Deleted channel for server ${serverId.substring(0, 8)}`);
         }
         res.json({ success: true });
     } catch (error) {
-        console.error('Error archiving server:', error);
-        res.status(500).json({ error: 'Failed to archive channel' });
+        console.error('Error deleting channel:', error);
+        res.status(500).json({ error: 'Failed to delete channel' });
     }
 });
 
