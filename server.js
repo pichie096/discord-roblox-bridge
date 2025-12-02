@@ -220,20 +220,38 @@ app.post('/unregister-server', async (req, res) => {
         const channelId = serverChannels.get(serverId);
         if (channelId) {
             const channel = await discordClient.channels.fetch(channelId);
+            const guild = channel.guild;
+            
+            // Set up permissions for archived channel
+            const permissionOverwrites = [
+                {
+                    // Hide from @everyone
+                    id: guild.roles.everyone.id,
+                    deny: [
+                        PermissionFlagsBits.ViewChannel,
+                        PermissionFlagsBits.SendMessages,
+                        PermissionFlagsBits.AddReactions
+                    ]
+                }
+            ];
+
+            // If a specific role is specified, allow them to VIEW archived channels (but not send)
+            if (DISCORD_ALLOWED_ROLE_ID) {
+                permissionOverwrites.push({
+                    id: DISCORD_ALLOWED_ROLE_ID,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                    deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions]
+                });
+            }
             
             // Archive the channel (lock it and rename)
             await channel.edit({
                 name: `archived-${channel.name}`,
-                permissionOverwrites: [
-                    {
-                        id: channel.guild.roles.everyone.id,
-                        deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions]
-                    }
-                ]
+                permissionOverwrites: permissionOverwrites
             });
             
             // Send closure message
-            await channel.send('🔒 **Roblox server closed.** This channel has been archived.');
+            await channel.send('🔒 **Roblox server closed.** This channel has been archived and is read-only.');
             
             // Remove from active servers
             serverChannels.delete(serverId);
