@@ -15,6 +15,7 @@ const MAX_MESSAGES = 50;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID; // Your Discord server ID
 const DISCORD_CATEGORY_ID = process.env.DISCORD_CATEGORY_ID; // Optional: category to create channels in
+const DISCORD_ALLOWED_ROLE_ID = process.env.DISCORD_ALLOWED_ROLE_ID; // Optional: Role ID that can see channels
 const PORT = process.env.PORT || 3000;
 
 // Create Discord bot
@@ -53,8 +54,27 @@ async function getOrCreateChannel(serverId) {
         const channelOptions = {
             name: `roblox-${shortId}`,
             type: ChannelType.GuildText,
-            topic: `Roblox Server ID: ${serverId}`
+            topic: `Roblox Server ID: ${serverId}`,
+            permissionOverwrites: [
+                {
+                    // Deny @everyone from seeing the channel
+                    id: guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel]
+                }
+            ]
         };
+
+        // If a specific role is specified, allow them to see it
+        if (DISCORD_ALLOWED_ROLE_ID) {
+            channelOptions.permissionOverwrites.push({
+                id: DISCORD_ALLOWED_ROLE_ID,
+                allow: [
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.ReadMessageHistory
+                ]
+            });
+        }
 
         // Add to category if specified
         if (DISCORD_CATEGORY_ID) {
@@ -185,6 +205,46 @@ app.post('/send', async (req, res) => {
     } catch (error) {
         console.error('Error sending to Discord:', error);
         res.status(500).json({ error: 'Failed to send message' });
+    }
+});
+
+// Unregister a Roblox server (archive channel)
+app.post('/unregister-server', async (req, res) => {
+    const { serverId } = req.body;
+    
+    if (!serverId) {
+        return res.status(400).json({ error: 'Missing serverId' });
+    }
+    
+    try {
+        const channelId = serverChannels.get(serverId);
+        if (channelId) {
+            const channel = await discordClient.channels.fetch(channelId);
+            
+            // Archive the channel (lock it and rename)
+            await channel.edit({
+                name: `archived-${channel.name}`,
+                permissionOverwrites: [
+                    {
+                        id: channel.guild.roles.everyone.id,
+                        deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions]
+                    }
+                ]
+            });
+            
+            // Send closure message
+            await channel.send('🔒 **Roblox server closed.** This channel has been archived.');
+            
+            // Remove from active servers
+            serverChannels.delete(serverId);
+            serverMessages.delete(serverId);
+            
+            console.log(`📦 Archived channel for server ${serverId.substring(0, 8)}`);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error archiving server:', error);
+        res.status(500).json({ error: 'Failed to archive channel' });
     }
 });
 
