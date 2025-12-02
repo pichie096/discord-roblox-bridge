@@ -1,22 +1,17 @@
 // Discord-Roblox Bridge Server
 // Install dependencies: npm install express discord.js dotenv
-
 const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 require('dotenv').config();
-
 const app = express();
 app.use(express.json());
-
 // Store recent messages (in memory - resets on restart)
 let recentMessages = [];
 const MAX_MESSAGES = 50;
-
 // Configuration
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const PORT = process.env.PORT || 3000;
-
 // Create Discord bot
 const discordClient = new Client({
     intents: [
@@ -25,12 +20,10 @@ const discordClient = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
-
 // When bot is ready
 discordClient.once('ready', () => {
     console.log(`✅ Discord bot logged in as ${discordClient.user.tag}`);
 });
-
 // Listen for Discord messages
 discordClient.on('messageCreate', async (message) => {
     // Ignore bot messages and only listen to specific channel
@@ -53,10 +46,8 @@ discordClient.on('messageCreate', async (message) => {
     
     console.log(`📩 Discord message from ${message.author.username}: ${message.content}`);
 });
-
 // Login to Discord
 discordClient.login(DISCORD_BOT_TOKEN);
-
 // API endpoint for Roblox to fetch Discord messages
 app.get('/messages', (req, res) => {
     const lastId = req.query.last;
@@ -75,7 +66,6 @@ app.get('/messages', (req, res) => {
         count: messagesToSend.length
     });
 });
-
 // API endpoint for Roblox to send messages to Discord
 app.post('/send', async (req, res) => {
     const { username, message } = req.body;
@@ -95,7 +85,6 @@ app.post('/send', async (req, res) => {
         res.status(500).json({ error: 'Failed to send message' });
     }
 });
-
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ 
@@ -104,7 +93,6 @@ app.get('/health', (req, res) => {
         messagesInMemory: recentMessages.length
     });
 });
-
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
