@@ -1,17 +1,22 @@
-// Discord-Roblox Bridge Server
-// Install dependencies: npm install express discord.js dotenv
+// Multi-Server Discord-Roblox Bridge
 const express = require('express');
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } = require('discord.js');
 require('dotenv').config();
+
 const app = express();
 app.use(express.json());
-// Store recent messages (in memory - resets on restart)
-let recentMessages = [];
+
+// Store messages per server
+const serverMessages = new Map(); // serverId -> array of messages
+const serverChannels = new Map(); // serverId -> Discord channel ID
 const MAX_MESSAGES = 50;
+
 // Configuration
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID; // Your Discord server ID
+const DISCORD_CATEGORY_ID = process.env.DISCORD_CATEGORY_ID; // Optional: category to create channels in
 const PORT = process.env.PORT || 3000;
+
 // Create Discord bot
 const discordClient = new Client({
     intents: [
@@ -20,16 +25,80 @@ const discordClient = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
+
 // When bot is ready
 discordClient.once('ready', () => {
     console.log(`✅ Discord bot logged in as ${discordClient.user.tag}`);
 });
+
+// Function to create or get Discord channel for a Roblox server
+async function getOrCreateChannel(serverId) {
+    // Check if we already have a channel for this server
+    if (serverChannels.has(serverId)) {
+        const channelId = serverChannels.get(serverId);
+        try {
+            const channel = await discordClient.channels.fetch(channelId);
+            return channel;
+        } catch (error) {
+            // Channel was deleted, remove from map
+            serverChannels.delete(serverId);
+        }
+    }
+
+    // Create new channel
+    try {
+        const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+        const shortId = serverId.substring(0, 8);
+        
+        const channelOptions = {
+            name: `roblox-${shortId}`,
+            type: ChannelType.GuildText,
+            topic: `Roblox Server ID: ${serverId}`
+        };
+
+        // Add to category if specified
+        if (DISCORD_CATEGORY_ID) {
+            channelOptions.parent = DISCORD_CATEGORY_ID;
+        }
+
+        const channel = await guild.channels.create(channelOptions);
+        
+        // Store the mapping
+        serverChannels.set(serverId, channel.id);
+        
+        // Send welcome message
+        await channel.send(`🎮 **Roblox Server Connected!**\nServer ID: \`${serverId}\`\nMessages from this Roblox server will appear here.`);
+        
+        console.log(`✅ Created Discord channel for server ${shortId}`);
+        return channel;
+    } catch (error) {
+        console.error('Error creating channel:', error);
+        throw error;
+    }
+}
+
 // Listen for Discord messages
 discordClient.on('messageCreate', async (message) => {
-    // Ignore bot messages and only listen to specific channel
-    if (message.author.bot || message.channel.id !== DISCORD_CHANNEL_ID) return;
+    // Ignore bot messages
+    if (message.author.bot) return;
     
-    // Store message
+    // Find which Roblox server this channel is linked to
+    let serverId = null;
+    for (const [sid, channelId] of serverChannels.entries()) {
+        if (channelId === message.channel.id) {
+            serverId = sid;
+            break;
+        }
+    }
+    
+    if (!serverId) return; // Not a linked channel
+    
+    // Store message for this server
+    if (!serverMessages.has(serverId)) {
+        serverMessages.set(serverId, []);
+    }
+    
+    const messages = serverMessages.get(serverId);
     const msgData = {
         id: message.id,
         username: message.author.username,
@@ -37,27 +106,55 @@ discordClient.on('messageCreate', async (message) => {
         timestamp: Date.now()
     };
     
-    recentMessages.push(msgData);
+    messages.push(msgData);
     
     // Keep only recent messages
-    if (recentMessages.length > MAX_MESSAGES) {
-        recentMessages.shift();
+    if (messages.length > MAX_MESSAGES) {
+        messages.shift();
     }
     
-    console.log(`📩 Discord message from ${message.author.username}: ${message.content}`);
+    console.log(`📩 Discord message in server ${serverId.substring(0, 8)} from ${message.author.username}: ${message.content}`);
 });
+
 // Login to Discord
 discordClient.login(DISCORD_BOT_TOKEN);
-// API endpoint for Roblox to fetch Discord messages
-app.get('/messages', (req, res) => {
-    const lastId = req.query.last;
+
+// Register a new Roblox server
+app.post('/register-server', async (req, res) => {
+    const { serverId } = req.body;
     
-    // Get messages after the last ID
-    let messagesToSend = recentMessages;
-    if (lastId) {
-        const lastIndex = recentMessages.findIndex(msg => msg.id === lastId);
+    if (!serverId) {
+        return res.status(400).json({ error: 'Missing serverId' });
+    }
+    
+    try {
+        const channel = await getOrCreateChannel(serverId);
+        res.json({ 
+            success: true, 
+            channelId: channel.id,
+            channelName: channel.name
+        });
+    } catch (error) {
+        console.error('Error registering server:', error);
+        res.status(500).json({ error: 'Failed to create channel' });
+    }
+});
+
+// Get messages for a specific Roblox server
+app.get('/messages', (req, res) => {
+    const { serverId, last } = req.query;
+    
+    if (!serverId) {
+        return res.status(400).json({ error: 'Missing serverId' });
+    }
+    
+    const messages = serverMessages.get(serverId) || [];
+    let messagesToSend = messages;
+    
+    if (last) {
+        const lastIndex = messages.findIndex(msg => msg.id === last);
         if (lastIndex !== -1) {
-            messagesToSend = recentMessages.slice(lastIndex + 1);
+            messagesToSend = messages.slice(lastIndex + 1);
         }
     }
     
@@ -66,38 +163,43 @@ app.get('/messages', (req, res) => {
         count: messagesToSend.length
     });
 });
-// API endpoint for Roblox to send messages to Discord
+
+// Send message from Roblox to Discord
 app.post('/send', async (req, res) => {
-    const { username, message } = req.body;
+    const { serverId, username, message, userId } = req.body;
     
-    if (!username || !message) {
-        return res.status(400).json({ error: 'Missing username or message' });
+    if (!serverId || !username || !message) {
+        return res.status(400).json({ error: 'Missing required fields' });
     }
     
     try {
-        const channel = await discordClient.channels.fetch(DISCORD_CHANNEL_ID);
-        await channel.send(`**${username}** (Roblox): ${message}`);
+        const channel = await getOrCreateChannel(serverId);
+        const avatarUrl = userId ? `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150` : null;
         
-        console.log(`📤 Sent to Discord from ${username}: ${message}`);
+        let messageContent = `**${username}** (Roblox): ${message}`;
+        
+        await channel.send(messageContent);
+        
+        console.log(`📤 Sent to Discord from ${username} in server ${serverId.substring(0, 8)}: ${message}`);
         res.json({ success: true });
     } catch (error) {
         console.error('Error sending to Discord:', error);
         res.status(500).json({ error: 'Failed to send message' });
     }
 });
-// Health check endpoint
+
+// Health check
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'online',
         discord: discordClient.isReady() ? 'connected' : 'disconnected',
-        messagesInMemory: recentMessages.length
+        activeServers: serverChannels.size,
+        totalMessages: Array.from(serverMessages.values()).reduce((sum, arr) => sum + arr.length, 0)
     });
 });
+
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📡 Endpoints:`);
-    console.log(`   GET  /messages - Fetch Discord messages`);
-    console.log(`   POST /send - Send message to Discord`);
-    console.log(`   GET  /health - Check server status`);
+    console.log(`📡 Multi-server bridge active`);
 });
