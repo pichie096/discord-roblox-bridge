@@ -11,10 +11,35 @@ const serverMessages = new Map(); // serverId -> array of messages
 const serverChannels = new Map(); // serverId -> Discord channel ID
 const MAX_MESSAGES = 50;
 
+// Profanity filter - add more words as needed
+const BLOCKED_WORDS = [
+    'fuck', 'shit', 'ass', 'bitch', 'damn', 'hell', 'crap',
+    'bastard', 'dick', 'pussy', 'cock', 'fag', 'nigger', 'nigga',
+    // Add more variations
+    'fck', 'fuk', 'sht', 'btch', 'dmn', 'a$', 'b1tch', 'fvck'
+];
+
+// Function to check if message contains profanity
+function containsProfanity(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Check each blocked word
+    for (const word of BLOCKED_WORDS) {
+        // Match whole words or parts of words
+        const regex = new RegExp(`\\b${word}\\b|${word}`, 'i');
+        if (regex.test(lowerMessage)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 // Configuration
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID; // Your Discord server ID
 const DISCORD_CATEGORY_ID = process.env.DISCORD_CATEGORY_ID; // Optional: category to create channels in
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY; // Optional: For AI moderation
 const PORT = process.env.PORT || 3000;
 
 // Create Discord bot
@@ -92,6 +117,18 @@ discordClient.on('messageCreate', async (message) => {
     }
     
     if (!serverId) return; // Not a linked channel
+    
+    // Check for profanity
+    if (containsProfanity(message.content)) {
+        try {
+            await message.delete();
+            await message.channel.send(`❌ ${message.author}, please keep the chat clean! Your message was removed.`);
+            console.log(`🚫 Blocked profanity from ${message.author.username} in server ${serverId.substring(0, 8)}`);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        return; // Don't send to Roblox
+    }
     
     // Store message for this server
     if (!serverMessages.has(serverId)) {
